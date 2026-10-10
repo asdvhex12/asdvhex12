@@ -1,38 +1,28 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import csv
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 import json
-import os
 import re
-import sys
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QColor, QFont
-from PyQt5.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QSplitter,
-    QStackedWidget,
-    QStatusBar,
-    QTableWidget,
-    QTableWidgetItem,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
 import requests
+import streamlit as st
+
+# ================= PAGE CONFIG =================
+st.set_page_config(
+    page_title="ŞAHAN VIP - Advanced OSINT & Log Extractor Suite",
+    page_icon="⚡",
+    layout="wide",
+)
+
+# ================= CUSTOM CSS =================
+st.markdown(
+    """
+    <style>
+    .stApp { background-color: #08090c; color: #d1d5db; }
+    .card { background-color: #0f111a; border: 1px solid #1f222e; border-radius: 8px; padding: 15px; margin-bottom: 10px; }
+    h1, h2, h3 { color: #ef4444; }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 # ================= API URL =================
 BASE_API_URL = "https://solidarksystems.alwaysdata.net/log.php?url="
@@ -92,7 +82,6 @@ class LogParser:
       line = line.strip()
       if not line:
         continue
-
       line = re.sub(r'^[\[\]{}"\']+|[\[\]{}"\']+$', "", line).strip()
 
       if "://" in line:
@@ -130,523 +119,106 @@ class LogParser:
     return list(dict.fromkeys(combos))
 
 
-# ================= THREADS =================
-class FetchWorker(QThread):
-  status_sig = pyqtSignal(str)
-  result_sig = pyqtSignal(list, str)
-  error_sig = pyqtSignal(str)
+# ================= SIDEBAR =================
+st.sidebar.markdown(
+    "<h1 style='color: #ef4444; font-size: 24px;'>ŞAHAN</h1>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    "<p style='color: #06b6d4; font-size: 11px; font-weight: bold;'>VIP LOG"
+    " EXTRACTOR v4.0 (Web Edition)</p>",
+    unsafe_allow_html=True,
+)
 
-  def __init__(self, target):
-    super().__init__()
-    self.target = target
+menu = st.sidebar.radio(
+    "Menü", ["⚡ Tekli URL Taraması", "🔍 Raw API Konsolu"]
+)
 
-  def run(self):
-    try:
-      self.status_sig.emit(f"🌐 [ŞAHAN] Bağlanılıyor: {self.target}...")
-      res = requests.get(BASE_API_URL + self.target, timeout=15)
-      if res.status_code == 200:
-        parsed = LogParser.parse_log(res.text)
-        self.result_sig.emit(parsed, res.text)
-        self.status_sig.emit(
-            f"⚡ [ŞAHAN] Tarama bitti. Ayıklanan combo: {len(parsed)}"
-        )
-      else:
-        self.error_sig.emit(f"HTTP Hatası: {res.status_code}")
-    except Exception as e:
-      self.error_sig.emit(str(e))
+st.sidebar.markdown("---")
+st.sidebar.markdown(
+    "<div style='background-color: #0f111a; padding: 10px; border-radius: 6px;"
+    " border: 1px solid #1f222e;'><b>Sistem İstatistiği:</b><br><font"
+    " color='#10b981'>● VIP API Aktif</font></div>",
+    unsafe_allow_html=True,
+)
 
+# ================= UYGULAMA EKRANI =================
+if menu == "⚡ Tekli URL Taraması":
+  st.markdown("## ŞAHAN VIP - Tekli URL Taraması")
 
-class BotWorker(QThread):
-  status_sig = pyqtSignal(str)
-  progress_sig = pyqtSignal(int, int)
-  done_sig = pyqtSignal(list)
-
-  def __init__(self, targets):
-    super().__init__()
-    self.targets = targets
-    self.results = []
-
-  def fetch(self, target):
-    try:
-      res = requests.get(BASE_API_URL + target, timeout=15)
-      if res.status_code == 200:
-        return {
-            "target": target,
-            "combos": LogParser.parse_log(res.text),
-            "ok": True,
-        }
-    except:
-      pass
-    return {"target": target, "ok": False}
-
-  def run(self):
-    total = len(self.targets)
-    completed = 0
-    with ThreadPoolExecutor(max_workers=5) as exec:
-      futures = [exec.submit(self.fetch, t) for t in self.targets]
-      for f in as_completed(futures):
-        res = f.result()
-        if res["ok"]:
-          self.results.append(res)
-        completed += 1
-        self.progress_sig.emit(completed, total)
-    self.done_sig.emit(self.results)
-
-
-# ================= YENİ ARAYÜZ (ŞAHAN FULL SUITE) =================
-class SAHANDashboard(QMainWindow):
-
-  def __init__(self):
-    super().__init__()
-    self.current_combos = []
-    self.init_ui()
-    self.apply_sahan_theme()
-
-  def apply_sahan_theme(self):
-    self.setStyleSheet("""
-            QMainWindow { background-color: #08090c; }
-            QWidget { font-family: 'Consolas', 'Segoe UI', monospace; color: #d1d5db; }
-            
-            /* Sol Menü / Sidebar */
-            #sidebar {
-                background-color: #0d0e12;
-                border-right: 1px solid #1f222e;
-            }
-            #sidebar_title {
-                color: #ef4444;
-                font-size: 20px;
-                font-weight: 900;
-                letter-spacing: 1px;
-                padding: 10px;
-            }
-            #sidebar_subtitle {
-                color: #06b6d4;
-                font-size: 11px;
-                font-weight: bold;
-                margin-bottom: 20px;
-            }
-            QPushButton.nav_btn {
-                background-color: transparent;
-                color: #9ca3af;
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 12px 15px;
-                text-align: left;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton.nav_btn:hover {
-                background-color: #161822;
-                color: #f3f4f6;
-                border-left: 3px solid #ef4444;
-            }
-            QPushButton.nav_btn:checked {
-                background-color: #1a1d2b;
-                color: #ef4444;
-                border-left: 4px solid #ef4444;
-            }
-
-            /* Kartlar / Paneller */
-            QFrame.card {
-                background-color: #0f111a;
-                border: 1px solid #1f222e;
-                border-radius: 8px;
-            }
-            
-            /* Butonlar */
-            QPushButton.action_btn {
-                background-color: #ef4444;
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            QPushButton.action_btn:hover { background-color: #dc2626; }
-            QPushButton.action_btn:disabled { background-color: #27272a; color: #52525b; }
-            
-            QPushButton#btn_green { background-color: #10b981; }
-            QPushButton#btn_green:hover { background-color: #059669; }
-            
-            QPushButton#btn_cyan { background-color: #06b6d4; color: #000; }
-            QPushButton#btn_cyan:hover { background-color: #0891b2; color: #fff; }
-
-            /* Girdiler */
-            QLineEdit, QTextEdit {
-                background-color: #141622;
-                border: 1px solid #272a3b;
-                border-radius: 6px;
-                padding: 10px;
-                color: #f3f4f6;
-                font-size: 13px;
-                selection-background-color: #ef4444;
-            }
-            QLineEdit:focus, QTextEdit:focus {
-                border: 1px solid #ef4444;
-            }
-
-            /* Tablo */
-            QTableWidget {
-                background-color: #0f111a;
-                border: 1px solid #1f222e;
-                gridline-color: #1a1d2a;
-                color: #e5e7eb;
-            }
-            QHeaderView::section {
-                background-color: #161824;
-                color: #ef4444;
-                padding: 10px;
-                border: none;
-                border-bottom: 2px solid #ef4444;
-                font-weight: bold;
-            }
-            QTableWidget::item:selected {
-                background-color: #991b1b;
-                color: #ffffff;
-            }
-
-            /* Progress Bar & Status */
-            QProgressBar {
-                background-color: #141622;
-                border: 1px solid #272a3b;
-                border-radius: 4px;
-                text-align: center;
-                color: white;
-            }
-            QProgressBar::chunk { background-color: #ef4444; }
-            QStatusBar { background-color: #0d0e12; color: #6b7280; border-top: 1px solid #1f222e; }
-        """)
-
-  def init_ui(self):
-    self.setWindowTitle("ŞAHAN VIP - Advanced OSINT & Log Extractor Suite")
-    self.resize(1280, 800)
-
-    # Ana Düzen
-    main_widget = QWidget()
-    self.setCentralWidget(main_widget)
-    main_layout = QHBoxLayout(main_widget)
-    main_layout.setContentsMargins(0, 0, 0, 0)
-    main_layout.setSpacing(0)
-
-    # ================= SOL SIDEBAR =================
-    sidebar = QFrame()
-    sidebar.setObjectName("sidebar")
-    sidebar.setFixedWidth(260)
-    sidebar_layout = QVBoxLayout(sidebar)
-    sidebar_layout.setContentsMargins(15, 20, 15, 20)
-
-    lbl_logo = QLabel("ŞAHAN")
-    lbl_logo.setObjectName("sidebar_title")
-    lbl_sub = QLabel("VIP LOG EXTRACTOR v4.0")
-    lbl_sub.setObjectName("sidebar_subtitle")
-
-    sidebar_layout.addWidget(lbl_logo)
-    sidebar_layout.addWidget(lbl_sub)
-
-    self.btn_nav_single = QPushButton("⚡ Tekli URL Taraması")
-    self.btn_nav_single.setCheckable(True)
-    self.btn_nav_single.setChecked(True)
-    self.btn_nav_single.setProperty("class", "nav_btn")
-    self.btn_nav_single.clicked.connect(lambda: self.switch_page(0))
-
-    self.btn_nav_bot = QPushButton("🤖 Multi-Thread Bot")
-    self.btn_nav_bot.setCheckable(True)
-    self.btn_nav_bot.setProperty("class", "nav_btn")
-    self.btn_nav_bot.clicked.connect(lambda: self.switch_page(1))
-
-    self.btn_nav_debug = QPushButton("🔍 Raw API Konsolu")
-    self.btn_nav_debug.setCheckable(True)
-    self.btn_nav_debug.setProperty("class", "nav_btn")
-    self.btn_nav_debug.clicked.connect(lambda: self.switch_page(2))
-
-    sidebar_layout.addWidget(self.btn_nav_single)
-    sidebar_layout.addWidget(self.btn_nav_bot)
-    sidebar_layout.addWidget(self.btn_nav_debug)
-    sidebar_layout.addStretch()
-
-    # Sol Menü Alt Bilgi
-    info_box = QFrame()
-    info_box.setProperty("class", "card")
-    ib_layout = QVBoxLayout(info_box)
-    ib_layout.addWidget(
-        QLabel(
-            "<b>Sistem İstatistiği:</b><br><font color='#10b981'>● VIP API"
-            " Aktif</font><br><font color='#06b6d4'>● Thread Limit: 5</font>"
-        )
+  col1, col2, col3 = st.columns(3)
+  with col1:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>TOPLAM SAF"
+        f" COMBO</font><br><h3 style='color: #ef4444; margin:0;'>{len(st.session_state.get('combos', []))}</h3></div>",
+        unsafe_allow_html=True,
     )
-    sidebar_layout.addWidget(info_box)
-
-    main_layout.addWidget(sidebar)
-
-    # ================= SAĞ İÇERİK ALANI =================
-    content_area = QWidget()
-    content_layout = QVBoxLayout(content_area)
-    content_layout.setContentsMargins(20, 20, 20, 20)
-
-    # Üst İstatistik Kartları
-    stats_grid = QGridLayout()
-
-    card1 = QFrame()
-    card1.setProperty("class", "card")
-    c1_l = QVBoxLayout(card1)
-    c1_l.addWidget(
-        QLabel(
-            "<font color='#9ca3af'>TOPLAM SAF COMBO</font>",
-            alignment=Qt.AlignLeft,
-        )
+  with col2:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>SON SORGULANAN"
+        f" DOMAIN</font><br><h3 style='color: #06b6d4;"
+        f" margin:0;'>{st.session_state.get('last_domain', 'Yok')}</h3></div>",
+        unsafe_allow_html=True,
     )
-    self.lbl_stat_combos = QLabel("0")
-    self.lbl_stat_combos.setStyleSheet(
-        "font-size: 28px; font-weight: bold; color: #ef4444;"
-    )
-    c1_l.addWidget(self.lbl_stat_combos)
-
-    card2 = QFrame()
-    card2.setProperty("class", "card")
-    c2_l = QVBoxLayout(card2)
-    c2_l.addWidget(
-        QLabel(
-            "<font color='#9ca3af'>SON SORGULANAN DOMAIN</font>",
-            alignment=Qt.AlignLeft,
-        )
-    )
-    self.lbl_stat_domain = QLabel("Yok")
-    self.lbl_stat_domain.setStyleSheet(
-        "font-size: 16px; font-weight: bold; color: #06b6d4;"
-    )
-    c2_l.addWidget(self.lbl_stat_domain)
-
-    card3 = QFrame()
-    card3.setProperty("class", "card")
-    c3_l = QVBoxLayout(card3)
-    c3_l.addWidget(
-        QLabel(
-            "<font color='#9ca3af'>ŞAHAN ENGINE STATUS</font>",
-            alignment=Qt.AlignLeft,
-        )
-    )
-    self.lbl_stat_status = QLabel("BEKLEMEDE")
-    self.lbl_stat_status.setStyleSheet(
-        "font-size: 16px; font-weight: bold; color: #10b981;"
-    )
-    c3_l.addWidget(self.lbl_stat_status)
-
-    stats_grid.addWidget(card1, 0, 0)
-    stats_grid.addWidget(card2, 0, 1)
-    stats_grid.addWidget(card3, 0, 2)
-    content_layout.addLayout(stats_grid)
-
-    # Sayfalar için StackedWidget
-    self.pages = QStackedWidget()
-
-    # --- PAGE 0: TEKLİ TARAMA ---
-    p0 = QWidget()
-    p0_l = QVBoxLayout(p0)
-
-    input_bar = QHBoxLayout()
-    self.input_target = QLineEdit()
-    self.input_target.setPlaceholderText(
-        "ŞAHAN Hedef Domain Girin (Örn: zulaoyun.com)..."
-    )
-    self.input_target.returnPressed.connect(self.start_single)
-    btn_scan = QPushButton("🚀 Comboları Ayıkla")
-    btn_scan.setProperty("class", "action_btn")
-    btn_scan.clicked.connect(self.start_single)
-
-    input_bar.addWidget(self.input_target)
-    input_bar.addWidget(btn_scan)
-    p0_l.addLayout(input_bar)
-
-    self.table_accounts = QTableWidget()
-    self.table_accounts.setColumnCount(2)
-    self.table_accounts.setHorizontalHeaderLabels(
-        ["Kullanıcı / E-Posta", "Şifre"]
-    )
-    self.table_accounts.horizontalHeader().setSectionResizeMode(
-        0, QHeaderView.Stretch
-    )
-    self.table_accounts.horizontalHeader().setSectionResizeMode(
-        1, QHeaderView.Stretch
-    )
-    self.table_accounts.setEditTriggers(QTableWidget.NoEditTriggers)
-    p0_l.addWidget(self.table_accounts)
-
-    actions = QHBoxLayout()
-    btn_copy = QPushButton("📋 Panoya Kopyala (user:pass)")
-    btn_copy.setProperty("class", "action_btn")
-    btn_copy.setObjectName("btn_cyan")
-    btn_copy.clicked.connect(self.copy_combos)
-
-    btn_export = QPushButton("💾 CSV Formatında Dışa Aktar")
-    btn_export.setProperty("class", "action_btn")
-    btn_export.setObjectName("btn_green")
-    btn_export.clicked.connect(self.export_csv)
-
-    actions.addWidget(btn_copy)
-    actions.addStretch()
-    actions.addWidget(btn_export)
-    p0_l.addLayout(actions)
-
-    self.pages.addWidget(p0)
-
-    # --- PAGE 1: MULTI BOT ---
-    p1 = QWidget()
-    p1_l = QVBoxLayout(p1)
-
-    p1_l.addWidget(
-        QLabel("<b>[ŞAHAN MULTI-THREAD BOT ENGINE]</b> Toplu Hedef Listesi:")
-    )
-    self.txt_bot_targets = QTextEdit()
-    self.txt_bot_targets.setPlaceholderText(
-        "Her satıra bir domain gelecek şekilde yazın:\nzulaoyun.com\nexample.com"
-    )
-    p1_l.addWidget(self.txt_bot_targets)
-
-    self.bot_progress = QProgressBar()
-    self.bot_progress.hide()
-    p1_l.addWidget(self.bot_progress)
-
-    self.btn_start_bot = QPushButton("⚡ Toplu Taramayı Başlat (ThreadPool)")
-    self.btn_start_bot.setProperty("class", "action_btn")
-    self.btn_start_bot.clicked.connect(self.start_bot)
-    p1_l.addWidget(self.btn_start_bot)
-
-    self.pages.addWidget(p1)
-
-    # --- PAGE 2: RAW DEBUG ---
-    p2 = QWidget()
-    p2_l = QVBoxLayout(p2)
-    p2_l.addWidget(QLabel("<b>[ŞAHAN LOG VIEWER]</b> API Ham Verisi:"))
-    self.txt_debug = QTextEdit()
-    self.txt_debug.setReadOnly(True)
-    p2_l.addWidget(self.txt_debug)
-
-    self.pages.addWidget(p2)
-
-    content_layout.addWidget(self.pages)
-    main_layout.addWidget(content_area)
-
-    # Status Bar
-    self.status = QStatusBar()
-    self.setStatusBar(self.status)
-    self.status.showMessage("ŞAHAN VIP System Ready.")
-
-  def switch_page(self, index):
-    self.pages.setCurrentIndex(index)
-    self.btn_nav_single.setChecked(index == 0)
-    self.btn_nav_bot.setChecked(index == 1)
-    self.btn_nav_debug.setChecked(index == 2)
-
-  def start_single(self):
-    target = self.input_target.text().strip()
-    if not target:
-      return
-    self.input_target.setEnabled(False)
-    self.lbl_stat_domain.setText(target)
-    self.lbl_stat_status.setText("TARANIYOR...")
-    self.lbl_stat_status.setStyleSheet(
-        "font-size: 16px; font-weight: bold; color: #ef4444;"
+  with col3:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>ŞAHAN ENGINE"
+        f" STATUS</font><br><h3 style='color: #10b981;"
+        f" margin:0;'>{st.session_state.get('status', 'BEKLEMEDE')}</h3></div>",
+        unsafe_allow_html=True,
     )
 
-    self.worker = FetchWorker(target)
-    self.worker.status_sig.connect(self.status.showMessage)
-    self.worker.error_sig.connect(self.on_error)
-    self.worker.result_sig.connect(self.populate_ui)
-    self.worker.start()
+  target = st.text_input(
+      "ŞAHAN Hedef Domain Girin", placeholder="Örn: zulaoyun.com"
+  )
 
-  def on_error(self, msg):
-    self.status.showMessage(f"❌ ŞAHAN Hata: {msg}")
-    self.lbl_stat_status.setText("HATA")
-    QMessageBox.warning(self, "ŞAHAN Error", msg)
-    self.input_target.setEnabled(True)
+  if st.button("🚀 Comboları Ayıkla", use_container_width=True):
+    if target:
+      st.session_state["last_domain"] = target
+      st.session_state["status"] = "TARANIYOR..."
+      with st.spinner(f"🌐 [ŞAHAN] Bağlanılıyor: {target}..."):
+        try:
+          res = requests.get(BASE_API_URL + target, timeout=15)
+          if res.status_code == 200:
+            parsed = LogParser.parse_log(res.text)
+            st.session_state["combos"] = parsed
+            st.session_state["raw_text"] = res.text
+            st.session_state["status"] = "TAMAMLANDI"
+            st.success(f"⚡ [ŞAHAN] Tarama bitti. Ayıklanan combo: {len(parsed)}")
+            st.rerun()
+          else:
+            st.error(f"HTTP Hatası: {res.status_code}")
+            st.session_state["status"] = "HATA"
+        except Exception as e:
+          st.error(f"Hata: {str(e)}")
+          st.session_state["status"] = "HATA"
 
-  def populate_ui(self, combos, raw_text):
-    self.current_combos = combos
-    self.lbl_stat_combos.setText(str(len(combos)))
-    self.lbl_stat_status.setText("TAMAMLANDI")
-    self.lbl_stat_status.setStyleSheet(
-        "font-size: 16px; font-weight: bold; color: #10b981;"
-    )
-    self.txt_debug.setText(raw_text)
+  combos = st.session_state.get("combos", [])
+  if combos:
+    import pandas as pd
 
-    self.table_accounts.setRowCount(0)
-    for i, (u, p) in enumerate(combos):
-      self.table_accounts.insertRow(i)
-      self.table_accounts.setItem(i, 0, QTableWidgetItem(u))
-      self.table_accounts.setItem(i, 1, QTableWidgetItem(p))
+    df = pd.DataFrame(combos, columns=["Kullanıcı / E-Posta", "Şifre"])
+    st.dataframe(df, use_container_width=True)
 
-    self.input_target.setEnabled(True)
+    col_a, col_b = st.columns(2)
+    with col_a:
+      combo_text = "\n".join([f"{u}:{p}" for u, p in combos])
+      st.download_button(
+          "📋 Comboları TXT Olarak İndir",
+          combo_text,
+          file_name="sahan_combos.txt",
+          mime="text/plain",
+      )
+    with col_b:
+      csv_data = df.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          "💾 CSV Formatında İndir",
+          csv_data,
+          file_name="SAHAN_Combos.csv",
+          mime="text/csv",
+      )
 
-  def start_bot(self):
-    targets = [
-        t.strip()
-        for t in self.txt_bot_targets.toPlainText().split("\n")
-        if t.strip()
-    ]
-    if not targets:
-      return
-    self.btn_start_bot.setEnabled(False)
-    self.bot_progress.setMaximum(len(targets))
-    self.bot_progress.setValue(0)
-    self.bot_progress.show()
-
-    self.b_worker = BotWorker(targets)
-    self.b_worker.progress_sig.connect(self.bot_progress.setValue)
-    self.b_worker.done_sig.connect(self.on_bot_done)
-    self.b_worker.start()
-
-  def on_bot_done(self, results):
-    self.btn_start_bot.setEnabled(True)
-    self.bot_progress.hide()
-
-    folder = "SAHAN_VIP_Combos_" + datetime.now().strftime("%H-%M-%S")
-    os.makedirs(folder, exist_ok=True)
-    total = 0
-    for res in results:
-      t_name = res["target"].replace("://", "_").replace("/", "_")
-      total += len(res["combos"])
-      with open(
-          os.path.join(folder, f"{t_name}.txt"), "w", encoding="utf-8"
-      ) as f:
-        for u, p in res["combos"]:
-          f.write(f"{u}:{p}\n")
-
-    msg = (
-        f"✅ ŞAHAN Bot tamamlandı! Toplam {total} saf combo"
-        f" kaydedildi.\nKlasör: {folder}"
-    )
-    self.status.showMessage(msg)
-    QMessageBox.information(self, "ŞAHAN Report", msg)
-
-  def copy_combos(self):
-    if not self.current_combos:
-      return
-    text = "\n".join([f"{u}:{p}" for u, p in self.current_combos])
-    QApplication.clipboard().setText(text)
-    self.status.showMessage("📋 ŞAHAN: Saf combolar panoya kopyalandı!")
-
-  def export_csv(self):
-    if not self.current_combos:
-      return
-    path, _ = QFileDialog.getSaveFileName(
-        self, "CSV Kaydet", "SAHAN_Combos.csv", "CSV Dosyası (*.csv)"
-    )
-    if not path:
-      return
-    try:
-      with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Kullanıcı Adı", "Şifre"])
-        writer.writerows(self.current_combos)
-      self.status.showMessage(f"💾 ŞAHAN Kaydedildi: {path}")
-    except Exception as e:
-      QMessageBox.critical(self, "Hata", str(e))
-
-
-if __name__ == "__main__":
-  app = QApplication(sys.argv)
-  app.setStyle("Fusion")
-  window = SAHANDashboard()
-  window.show()
-  sys.exit(app.exec_())
+elif menu == "🔍 Raw API Konsolu":
+  st.markdown("## ŞAHAN Log Viewer - API Ham Verisi")
+  raw_text = st.session_state.get("raw_text", "Henüz veri çekilmedi.")
+  st.text_area("Ham Yanıt", raw_text, height=500)
