@@ -855,7 +855,6 @@ elif menu == "🔍 Raw API Konsolu":
 elif menu == "🔥 Hotmail Checker":
   st.markdown("## ŞAHAN VIP - Hotmail Checker v7.3")
 
-  # Otomatik olarak yukarıdaki taramadan gelen comboları aktarabilme opsiyonu
   session_combos = st.session_state.get("combos", [])
   default_combo_str = (
       "\n".join([f"{u}:{p}" for u, p in session_combos])
@@ -919,8 +918,40 @@ elif menu == "🔥 Hotmail Checker":
         lock = threading.Lock()
         stop_event = threading.Event()
 
-        results_box = st.empty()
+        # İstatistik Kartları Alanı
+        st.markdown("### Canlı Kontrol Paneli")
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        h_box = stat_col1.empty()
+        f_box = stat_col2.empty()
+        b_box = stat_col3.empty()
+        t_box = stat_col4.empty()
+
+        log_box_area = st.empty()
         log_messages = []
+
+        def update_stats_display():
+          h_box.markdown(
+              f"<div class='card'><b>HIT</b><br><h3 style='color: #00ff66;"
+              f" margin:0;'>{stats.hits}</h3></div>",
+              unsafe_allow_html=True,
+          )
+          f_box.markdown(
+              f"<div class='card'><b>FREE</b><br><h3 style='color: #ffcc00;"
+              f" margin:0;'>{stats.free}</h3></div>",
+              unsafe_allow_html=True,
+          )
+          b_box.markdown(
+              f"<div class='card'><b>BAD</b><br><h3 style='color: #ff003c;"
+              f" margin:0;'>{stats.bad}</h3></div>",
+              unsafe_allow_html=True,
+          )
+          t_box.markdown(
+              f"<div class='card'><b>TOPLAM</b><br><h3 style='color: #06b6d4;"
+              f" margin:0;'>{stats.total} / {len(combos_to_check)}</h3></div>",
+              unsafe_allow_html=True,
+          )
+
+        update_stats_display()
 
         def checker_worker(wq, lck, kws, notif):
           while not wq.empty() and not stop_event.is_set():
@@ -938,8 +969,8 @@ elif menu == "🔥 Hotmail Checker":
                     f"{kw}({d['total']})" for kw, d in matches.items()
                 )
                 log_msg = f"✅ [HIT] {email}:{password} -> {match_str}"
-                log_messages.append(log_msg)
                 with lck:
+                  log_messages.insert(0, log_msg)
                   with open(hit_file, "a", encoding="utf-8") as f:
                     f.write(f"{email}:{password} | {match_str}\n")
                 if notif:
@@ -947,15 +978,23 @@ elif menu == "🔥 Hotmail Checker":
               elif status == "FREE":
                 stats.add("free")
                 log_msg = f"🟡 [FREE] {email}:{password}"
-                log_messages.append(log_msg)
                 with lck:
+                  log_messages.insert(0, log_msg)
                   with open(free_file, "a", encoding="utf-8") as f:
                     f.write(f"{email}:{password}\n")
               else:
                 stats.add("bad")
-                log_messages.append(f"❌ [BAD] {email}:{password}")
-            except:
+                with lck:
+                  log_messages.insert(
+                      0, f"❌ [BAD] {email}:{password} (Hatalı/Geçersiz)"
+                  )
+            except Exception as ex:
               stats.add("bad")
+              with lck:
+                log_messages.insert(
+                    0, f"⚠️ [ERROR] {email}:{password} -> {str(ex)}"
+                )
+
             wq.task_done()
 
         threads = []
@@ -968,9 +1007,17 @@ elif menu == "🔥 Hotmail Checker":
           t.start()
           threads.append(t)
 
-        work_queue.join()
-        st.success("🎉 Tüm Hotmail hesapları tarandı ve tamamlandı!")
-        if log_messages:
-          st.text_area(
-              "Canlı Sonuç Günlüğü", "\n".join(log_messages), height=300
+        # Thread'ler çalışırken arayüzü canlı güncelle
+        while any(t.is_alive() for t in threads):
+          time.sleep(0.5)
+          update_stats_display()
+          log_box_area.text_area(
+              "Canlı Akış Logu", "\n".join(log_messages[:100]), height=250
           )
+
+        work_queue.join()
+        update_stats_display()
+        st.success(
+            "🎉 Tüm Hotmail hesapları tarandı ve işlem tamamlandı! Hitler ve"
+            " Free'ler ilgili dosyalara kaydedildi."
+        )
