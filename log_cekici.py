@@ -918,7 +918,6 @@ elif menu == "🔥 Hotmail Checker":
         lock = threading.Lock()
         stop_event = threading.Event()
 
-        # İstatistik Kartları Alanı
         st.markdown("### Canlı Kontrol Paneli")
         stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
         h_box = stat_col1.empty()
@@ -985,14 +984,18 @@ elif menu == "🔥 Hotmail Checker":
               else:
                 stats.add("bad")
                 with lck:
-                  log_messages.insert(
-                      0, f"❌ [BAD] {email}:{password} (Hatalı/Geçersiz)"
-                  )
+                  log_messages.insert(0, f"❌ [BAD] {email}:{password}")
+            except LoginError as le:
+              stats.add("bad")
+              with lck:
+                log_messages.insert(
+                    0, f"⚠️ [2FA / ERROR] {email}:{password} -> {str(le)}"
+                )
             except Exception as ex:
               stats.add("bad")
               with lck:
                 log_messages.insert(
-                    0, f"⚠️ [ERROR] {email}:{password} -> {str(ex)}"
+                    0, f"❌ [BAD] {email}:{password} -> {str(ex)}"
                 )
 
             wq.task_done()
@@ -1007,7 +1010,6 @@ elif menu == "🔥 Hotmail Checker":
           t.start()
           threads.append(t)
 
-        # Thread'ler çalışırken arayüzü canlı güncelle
         while any(t.is_alive() for t in threads):
           time.sleep(0.5)
           update_stats_display()
@@ -1018,6 +1020,5 @@ elif menu == "🔥 Hotmail Checker":
         work_queue.join()
         update_stats_display()
         st.success(
-            "🎉 Tüm Hotmail hesapları tarandı ve işlem tamamlandı! Hitler ve"
-            " Free'ler ilgili dosyalara kaydedildi."
+            "🎉 Tüm Hotmail hesapları tarandı ve işlem tamamlandı!"
         )
