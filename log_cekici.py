@@ -406,11 +406,11 @@ elif menu == "✉️ Hotmail Checker":
           if status == "HIT":
             hits.append((email, password, str(matches)))
           elif status == "FREE":
-            frees.append((email, password, "-"))
+            frees.append((email, password, "Boş / Serbest"))
           else:
-            bads.append((email, password))
+            bads.append((email, password, "Hatalı / Bad"))
         except:
-          bads.append((email, password))
+          bads.append((email, password, "Hata"))
 
       if total > 0:
         progress_bar.progress((i + 1) / total)
@@ -421,14 +421,16 @@ elif menu == "✉️ Hotmail Checker":
         f" {len(bads)}"
     )
 
-    if hits or frees:
+    all_results = hits + frees + bads
+    if all_results:
       import pandas as pd
 
-      all_results = hits + [(e, p, "-") for e, p in frees]
-      df = pd.DataFrame(all_results, columns=["Email", "Şifre", "Eşleşme"])
+      df = pd.DataFrame(all_results, columns=["Email", "Şifre", "Durum"])
       st.dataframe(df, use_container_width=True)
 
-      hit_text = "\n".join([f"{r[0]}:{r[1]}" for r in all_results])
+      hit_text = "\n".join(
+          [f"{r[0]}:{r[1]} ({r[2]})" for r in all_results if r in hits or r in frees]
+      )
       st.download_button(
           "📋 Sonuçları İndir (TXT)",
           hit_text,
