@@ -1,146 +1,224 @@
-import os
-from urllib.parse import urlparse
-
+import csv
+from datetime import datetime
+import json
+import re
 import requests
 import streamlit as st
 
+# ================= PAGE CONFIG =================
 st.set_page_config(
-    page_title="ŞAHAN VIP • Birleşik Panel",
+    page_title="ŞAHAN VIP - Advanced OSINT & Log Extractor Suite",
     page_icon="⚡",
     layout="wide",
 )
 
-st.markdown("""
-<style>
-    .stApp { background: #090a0d; }
-    section[data-testid="stSidebar"] { background: #242630; }
-    h1, h2, h3 { color: #e8edf5; }
-    div[data-testid="stMetric"] {
-        background: #171a22; border: 1px solid #2b303b;
-        padding: 12px; border-radius: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.sidebar.markdown("## 🔴 ŞAHAN & DevilDev")
-st.sidebar.caption("VIP SUITE • Streamlit")
-page = st.sidebar.radio(
-    "Menü",
-    [
-        "⚡ Tekli URL Taraması",
-        "✉️ Hotmail Checker",
-        "🔎 Raw API Konsolu",
-    ],
+# ================= CUSTOM CSS =================
+st.markdown(
+    """
+    <style>
+    .stApp { background-color: #08090c; color: #d1d5db; }
+    .card { background-color: #0f111a; border: 1px solid #1f222e; border-radius: 8px; padding: 15px; margin-bottom: 10px; }
+    h1, h2, h3 { color: #ef4444; }
+    </style>
+""",
+    unsafe_allow_html=True,
 )
 
-def normalize_public_url(raw: str) -> str:
-    raw = raw.strip()
-    if not raw:
-        raise ValueError("Lütfen bir URL gir.")
-    if "://" not in raw:
-        raw = "https://" + raw
-    parsed = urlparse(raw)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ValueError("Geçerli bir http:// veya https:// adresi gir.")
-    host = parsed.hostname.lower()
-    if host in ("localhost",) or host.endswith(".localhost") or host.endswith(".local"):
-        raise ValueError("Yerel adreslere istek gönderilemez.")
-    if parsed.username or parsed.password:
-        raise ValueError("URL içine kullanıcı adı/şifre ekleme.")
-    return raw
+# ================= API URL =================
+BASE_API_URL = "https://solidarksystems.alwaysdata.net/log.php?url="
 
-if page == "⚡ Tekli URL Taraması":
-    st.title("⚡ ŞAHAN VIP - Tekli URL Taraması")
-    st.write("Bir web adresinin erişilebilirliğini ve HTTP durumunu kontrol et.")
-    url = st.text_input("Hedef URL", placeholder="https://example.com")
-    timeout = st.slider("Zaman aşımı (saniye)", 3, 20, 10)
-    if st.button("🚀 URL'yi Kontrol Et", type="primary", use_container_width=True):
+
+# ================= PARSE MOTORU =================
+class LogParser:
+
+  @staticmethod
+  def parse_log(response_text):
+    combos = []
+    lines_to_check = []
+
+    try:
+      data = json.loads(response_text)
+
+      def extract_values(obj):
+        if isinstance(obj, dict):
+          for k, v in obj.items():
+            extract_values(v)
+        elif isinstance(obj, list):
+          for item in obj:
+            extract_values(item)
+        elif isinstance(obj, str):
+          lines_to_check.extend(obj.split("\n"))
+
+      extract_values(data)
+    except:
+      pass
+
+    raw_lines = (
+        response_text.replace("<br>", "\n").replace("<br/>", "\n").split("\n")
+    )
+    lines_to_check.extend(raw_lines)
+
+    blacklist = {
+        "host",
+        "user-agent",
+        "accept",
+        "referer",
+        "origin",
+        "cookie",
+        "date",
+        "server",
+        "content-type",
+        "connection",
+        "pragma",
+        "cache-control",
+        "authorization",
+        "aranan_domain",
+        "bulunan_kayit_sayisi",
+        "auth",
+        "sonuclar",
+    }
+
+    for line in lines_to_check:
+      line = line.strip()
+      if not line:
+        continue
+      line = re.sub(r'^[\[\]{}"\']+|[\[\]{}"\']+$', "", line).strip()
+
+      if "://" in line:
+        parts = line.split("://", 1)
+        if len(parts) > 1:
+          rem = parts[1]
+          if ":" in rem:
+            last_colon_idx = rem.rfind(":")
+            if last_colon_idx != -1:
+              sub_str = rem[:last_colon_idx]
+              user_colon_idx = sub_str.rfind(":")
+              if user_colon_idx != -1:
+                u = sub_str[user_colon_idx + 1 :].strip().strip("\"'/\\")
+                p = rem[last_colon_idx + 1 :].strip().strip("\"'/\\")
+                if (
+                    len(u) > 1
+                    and len(p) > 0
+                    and u.lower() not in blacklist
+                ):
+                  combos.append((u, p))
+                  continue
+
+      if ":" in line and "://" not in line:
+        parts = line.split(":", 1)
+        u = parts[0].strip().strip("\"'{},[]<>")
+        p = parts[1].strip().strip("\"'{},[]<>")
+        if (
+            len(u) > 1
+            and len(p) > 0
+            and u.lower() not in blacklist
+            and len(u.split()) < 3
+        ):
+          combos.append((u, p))
+
+    return list(dict.fromkeys(combos))
+
+
+# ================= SIDEBAR =================
+st.sidebar.markdown(
+    "<h1 style='color: #ef4444; font-size: 24px;'>ŞAHAN</h1>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    "<p style='color: #06b6d4; font-size: 11px; font-weight: bold;'>VIP LOG"
+    " EXTRACTOR v4.0 (Web Edition)</p>",
+    unsafe_allow_html=True,
+)
+
+menu = st.sidebar.radio(
+    "Menü", ["⚡ Tekli URL Taraması", "🔍 Raw API Konsolu"]
+)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown(
+    "<div style='background-color: #0f111a; padding: 10px; border-radius: 6px;"
+    " border: 1px solid #1f222e;'><b>Sistem İstatistiği:</b><br><font"
+    " color='#10b981'>● VIP API Aktif</font></div>",
+    unsafe_allow_html=True,
+)
+
+# ================= UYGULAMA EKRANI =================
+if menu == "⚡ Tekli URL Taraması":
+  st.markdown("## ŞAHAN VIP - Tekli URL Taraması")
+
+  col1, col2, col3 = st.columns(3)
+  with col1:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>TOPLAM SAF"
+        f" COMBO</font><br><h3 style='color: #ef4444; margin:0;'>{len(st.session_state.get('combos', []))}</h3></div>",
+        unsafe_allow_html=True,
+    )
+  with col2:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>SON SORGULANAN"
+        f" DOMAIN</font><br><h3 style='color: #06b6d4;"
+        f" margin:0;'>{st.session_state.get('last_domain', 'Yok')}</h3></div>",
+        unsafe_allow_html=True,
+    )
+  with col3:
+    st.markdown(
+        "<div class='card'><font color='#9ca3af'>ŞAHAN ENGINE"
+        f" STATUS</font><br><h3 style='color: #10b981;"
+        f" margin:0;'>{st.session_state.get('status', 'BEKLEMEDE')}</h3></div>",
+        unsafe_allow_html=True,
+    )
+
+  target = st.text_input(
+      "ŞAHAN Hedef Domain Girin", placeholder="Örn: zulaoyun.com"
+  )
+
+  if st.button("🚀 Comboları Ayıkla", use_container_width=True):
+    if target:
+      st.session_state["last_domain"] = target
+      st.session_state["status"] = "TARANIYOR..."
+      with st.spinner(f"🌐 [ŞAHAN] Bağlanılıyor: {target}..."):
         try:
-            target = normalize_public_url(url)
-            with st.spinner("Adres kontrol ediliyor..."):
-                response = requests.get(
-                    target,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    headers={"User-Agent": "SahanPanel/1.0"},
-                )
-            st.success("İstek tamamlandı.")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("HTTP Durumu", response.status_code)
-            c2.metric("Yanıt Süresi", f"{response.elapsed.total_seconds():.2f} sn")
-            c3.metric("İçerik Boyutu", f"{len(response.content):,} bayt")
-            st.write("Son URL:", response.url)
-            st.write("İçerik türü:", response.headers.get("content-type", "Bilinmiyor"))
-            with st.expander("Yanıt gövdesinin ilk 5.000 karakteri"):
-                st.code(response.text[:5000] or "(Boş yanıt)")
-        except requests.RequestException as exc:
-            st.error(f"İstek başarısız: {exc}")
-        except ValueError as exc:
-            st.warning(str(exc))
+          res = requests.get(BASE_API_URL + target, timeout=15)
+          if res.status_code == 200:
+            parsed = LogParser.parse_log(res.text)
+            st.session_state["combos"] = parsed
+            st.session_state["raw_text"] = res.text
+            st.session_state["status"] = "TAMAMLANDI"
+            st.success(f"⚡ [ŞAHAN] Tarama bitti. Ayıklanan combo: {len(parsed)}")
+            st.rerun()
+          else:
+            st.error(f"HTTP Hatası: {res.status_code}")
+            st.session_state["status"] = "HATA"
+        except Exception as e:
+          st.error(f"Hata: {str(e)}")
+          st.session_state["status"] = "HATA"
 
-elif page == "✉️ Hotmail Checker":
-    st.title("✉️ Hotmail Checker")
-    st.info(
-        "Bu bölüm Streamlit'e uyarlanmış güvenli hesap bağlantısı alanıdır. "
-        "Toplu parola denemesi veya başkalarına ait hesapları kontrol etme yerine, "
-        "Microsoft'un resmî OAuth giriş akışı kullanılmalıdır."
-    )
-    st.subheader("Microsoft hesabını bağlama")
-    st.write(
-        "OAuth kurulumu için Microsoft Entra uygulama kaydı, Client ID ve "
-        "Streamlit uygulamanızın yönlendirme adresi gerekir. İstemci sırrını "
-        "koda yazmak yerine Streamlit Secrets içinde saklayın."
-    )
-    st.code(
-        '[microsoft]\\n'
-        'client_id = "YOUR_CLIENT_ID"\\n'
-        'client_secret = "YOUR_CLIENT_SECRET"\\n'
-        'tenant_id = "consumers"\\n'
-        'redirect_uri = "https://YOUR-APP.streamlit.app"\\n',
-        language="toml",
-    )
-    st.caption(
-        "Bu örnek, OAuth kimlik bilgilerini doğrulamadan giriş yapılmış gibi göstermez. "
-        "OAuth akışı yapılandırılınca kullanıcı yalnızca Microsoft'un resmî giriş sayfasına yönlendirilmelidir."
-    )
-    st.link_button(
-        "Microsoft hesap güvenliği",
-        "https://account.microsoft.com/security",
-        use_container_width=False,
-    )
+  combos = st.session_state.get("combos", [])
+  if combos:
+    import pandas as pd
 
-elif page == "🔎 Raw API Konsolu":
-    st.title("🔎 Raw API Konsolu")
-    st.write("Erişme yetkin olan herkese açık bir API uç noktasının yanıtını görüntüle.")
-    endpoint = st.text_input("API URL", placeholder="https://api.example.com/status")
-    method = st.selectbox("HTTP yöntemi", ["GET", "POST"])
-    body = ""
-    if method == "POST":
-        body = st.text_area("JSON gövdesi (isteğe bağlı)", placeholder='{"status":"test"}')
-    timeout = st.slider("Zaman aşımı (saniye)", 3, 20, 10, key="api_timeout")
-    if st.button("API İsteği Gönder", type="primary"):
-        try:
-            target = normalize_public_url(endpoint)
-            kwargs = {
-                "timeout": timeout,
-                "headers": {"Accept": "application/json", "User-Agent": "SahanPanel/1.0"},
-            }
-            if method == "POST":
-                if body.strip():
-                    import json
-                    kwargs["json"] = json.loads(body)
-                response = requests.post(target, **kwargs)
-            else:
-                response = requests.get(target, **kwargs)
-            st.write(f"HTTP durumu: **{response.status_code}**")
-            st.write(f"Yanıt süresi: **{response.elapsed.total_seconds():.2f} sn**")
-            st.code(response.text[:20000] or "(Boş yanıt)")
-        except ValueError as exc:
-            st.warning(str(exc))
-        except requests.RequestException as exc:
-            st.error(f"İstek başarısız: {exc}")
-        except Exception as exc:
-            st.error(f"Girdi işlenemedi: {exc}")
+    df = pd.DataFrame(combos, columns=["Kullanıcı / E-Posta", "Şifre"])
+    st.dataframe(df, use_container_width=True)
 
-st.sidebar.divider()
-st.sidebar.caption("Hesap parolalarını uygulamaya veya loglara yapıştırmayın.")
+    col_a, col_b = st.columns(2)
+    with col_a:
+      combo_text = "\n".join([f"{u}:{p}" for u, p in combos])
+      st.download_button(
+          "📋 Comboları TXT Olarak İndir",
+          combo_text,
+          file_name="sahan_combos.txt",
+          mime="text/plain",
+      )
+    with col_b:
+      csv_data = df.to_csv(index=False).encode("utf-8")
+      st.download_button(
+          "💾 CSV Formatında İndir",
+          csv_data,
+          file_name="SAHAN_Combos.csv",
+          mime="text/csv",
+      )
+
+elif menu == "🔍 Raw API Konsolu":
+  st.markdown("## ŞAHAN Log Viewer - API Ham Verisi")
+  raw_text = st.session_state.get("raw_text", "Henüz veri çekilmedi.")
+  st.text_area("Ham Yanıt", raw_text, height=500)
